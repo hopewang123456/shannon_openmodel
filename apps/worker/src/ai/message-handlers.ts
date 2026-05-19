@@ -4,7 +4,6 @@
 // it under the terms of the GNU Affero General Public License version 3
 // as published by the Free Software Foundation.
 
-import type { SDKAssistantMessageError } from '@anthropic-ai/claude-agent-sdk';
 import { PentestError } from '../services/error-handling.js';
 import type { ActivityLogger } from '../types/activity-logger.js';
 import { ErrorCode } from '../types/errors.js';
@@ -103,8 +102,9 @@ function detectApiError(content: string): ApiErrorDetection {
   return { detected: false };
 }
 
-// Maps SDK structured error types to our error handling.
-function handleStructuredError(errorType: SDKAssistantMessageError, content: string): ApiErrorDetection {
+// Maps SDK-style error types to our error handling.
+// Preserved for backward compatibility with existing code that passes string error types.
+function handleStructuredError(errorType: string, content: string): ApiErrorDetection {
   switch (errorType) {
     case 'billing_error':
       return {

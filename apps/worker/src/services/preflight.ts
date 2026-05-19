@@ -15,7 +15,7 @@
  * 1. Repository path exists and contains .git
  * 2. Config file parses and validates (if provided)
  * 3. code_path rules match real entries in the repo (filesystem only)
- * 4. Credentials validate via Claude Agent SDK query (API key, OAuth, Bedrock, or Vertex AI)
+ * 4. Credentials validate via HTTP API ping
  * 5. Target URL is reachable from the container (DNS + HTTP)
  */
 
@@ -23,16 +23,15 @@ import { lookup } from 'node:dns/promises';
 import fs from 'node:fs/promises';
 import http from 'node:http';
 import https from 'node:https';
-import type { SDKAssistantMessageError } from '@anthropic-ai/claude-agent-sdk';
-import { query } from '@anthropic-ai/claude-agent-sdk';
 import { glob } from 'zx';
+import { validateLLMConnection } from '../ai/llm-provider.js';
 import { resolveModel } from '../ai/models.js';
 import { parseConfig } from '../config-parser.js';
 import type { ActivityLogger } from '../types/activity-logger.js';
 import type { Config, Rule } from '../types/config.js';
 import { ErrorCode } from '../types/errors.js';
 import { err, ok, type Result } from '../types/result.js';
-import { isRetryableError, PentestError } from './error-handling.js';
+import { PentestError } from './error-handling.js';
 
 const TARGET_URL_TIMEOUT_MS = 10_000;
 
@@ -200,185 +199,38 @@ async function validateCodePathsExist(
 
 // === Credential Validation ===
 
-/** Map SDK error type to a human-readable preflight PentestError. */
-function classifySdkError(sdkError: SDKAssistantMessageError, authType: string): Result<void, PentestError> {
-  switch (sdkError) {
-    case 'authentication_failed':
-      return err(
-        new PentestError(
-          `Invalid ${authType}. Check your credentials in .env and try again.`,
-          'config',
-          false,
-          { authType, sdkError },
-          ErrorCode.AUTH_FAILED,
-        ),
-      );
-    case 'billing_error':
-      return err(
-        new PentestError(
-          `Anthropic account has a billing issue. Add credits or check your billing dashboard.`,
-          'billing',
-          true,
-          { authType, sdkError },
-          ErrorCode.BILLING_ERROR,
-        ),
-      );
-    case 'rate_limit':
-      return err(
-        new PentestError(
-          `Anthropic rate limit or spending cap reached. Wait a few minutes and try again.`,
-          'billing',
-          true,
-          { authType, sdkError },
-          ErrorCode.BILLING_ERROR,
-        ),
-      );
-    case 'server_error':
-      return err(
-        new PentestError(`Anthropic API is temporarily unavailable. Try again shortly.`, 'network', true, {
-          authType,
-          sdkError,
-        }),
-      );
-    default:
-      return err(
-        new PentestError(
-          `${authType} validation failed unexpectedly. Check your credentials in .env.`,
-          'config',
-          false,
-          { authType, sdkError },
-          ErrorCode.AUTH_FAILED,
-        ),
-      );
-  }
-}
-
-/** Validate credentials via a minimal Claude Agent SDK query. */
+/** Validate credentials via an HTTP API ping instead of the Claude Agent SDK query. */
 async function validateCredentials(logger: ActivityLogger, apiKey?: string, providerConfig?: import('../types/config.js').ProviderConfig): Promise<Result<void, PentestError>> {
-  // 0. If providerConfig is present, credentials are managed by the caller.
-  //    The executor will map providerConfig directly to sdkEnv — no process.env needed.
+  // 0. If providerConfig is present, skip env-based validation
   if (providerConfig) {
     logger.info(`Provider config present (type: ${providerConfig.providerType || 'anthropic_api'}) — skipping env-based credential validation`);
     return ok(undefined);
   }
 
-  // 0b. If apiKey provided via config, set it in env for SDK validation
-  //     This avoids requiring process.env.ANTHROPIC_API_KEY when key is threaded via input
-  if (apiKey) {
-    process.env.ANTHROPIC_API_KEY = apiKey;
-  }
-  // 1. Custom base URL — validate endpoint is reachable via SDK query
-  if (process.env.ANTHROPIC_BASE_URL && process.env.ANTHROPIC_AUTH_TOKEN) {
-    const baseUrl = process.env.ANTHROPIC_BASE_URL;
-    logger.info('Validating custom base URL');
+  // 1. Build LLM config from env
+  const llmConfig: Record<string, string | undefined> = {};
+  if (apiKey) llmConfig.apiKey = apiKey;
 
-    try {
-      for await (const message of query({ prompt: 'hi', options: { model: resolveModel('small'), maxTurns: 1 } })) {
-        if (message.type === 'assistant' && message.error) {
-          return classifySdkError(message.error, `custom endpoint (${baseUrl})`);
-        }
-        if (message.type === 'result') {
-          break;
-        }
-      }
+  const provider = (() => {
+    if (process.env.ANTHROPIC_BASE_URL && process.env.ANTHROPIC_AUTH_TOKEN) return 'anthropic' as const;
+    if (process.env.LLM_PROVIDER === 'anthropic') return 'anthropic' as const;
+    return undefined;
+  })();
 
-      logger.info('Custom base URL OK');
-      return ok(undefined);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      return err(
-        new PentestError(
-          `Custom base URL unreachable: ${baseUrl} — ${message}`,
-          'network',
-          false,
-          { baseUrl },
-          ErrorCode.AUTH_FAILED,
-        ),
-      );
-    }
-  }
+  const baseUrl =
+    process.env.ANTHROPIC_BASE_URL ||
+    process.env.OPENAI_BASE_URL ||
+    undefined;
 
-  // 2. Bedrock mode — validate required AWS credentials are present
-  if (process.env.CLAUDE_CODE_USE_BEDROCK === '1') {
-    const required = [
-      'AWS_REGION',
-      'AWS_BEARER_TOKEN_BEDROCK',
-      'ANTHROPIC_SMALL_MODEL',
-      'ANTHROPIC_MEDIUM_MODEL',
-      'ANTHROPIC_LARGE_MODEL',
-    ];
-    const missing = required.filter((v) => !process.env[v]);
-    if (missing.length > 0) {
-      return err(
-        new PentestError(
-          `Bedrock mode requires the following env vars in .env: ${missing.join(', ')}`,
-          'config',
-          false,
-          { missing },
-          ErrorCode.AUTH_FAILED,
-        ),
-      );
-    }
-    logger.info('Bedrock credentials OK');
-    return ok(undefined);
-  }
+  // 2. Check that at least one credential is present
+  const hasApiKey = !!(apiKey || process.env.OPENAI_API_KEY || process.env.ANTHROPIC_API_KEY);
+  const hasBedrock = process.env.CLAUDE_CODE_USE_BEDROCK === '1';
+  const hasVertex = process.env.CLAUDE_CODE_USE_VERTEX === '1';
 
-  // 3. Vertex AI mode — validate required GCP credentials are present
-  if (process.env.CLAUDE_CODE_USE_VERTEX === '1') {
-    const required = [
-      'CLOUD_ML_REGION',
-      'ANTHROPIC_VERTEX_PROJECT_ID',
-      'ANTHROPIC_SMALL_MODEL',
-      'ANTHROPIC_MEDIUM_MODEL',
-      'ANTHROPIC_LARGE_MODEL',
-    ];
-    const missing = required.filter((v) => !process.env[v]);
-    if (missing.length > 0) {
-      return err(
-        new PentestError(
-          `Vertex AI mode requires the following env vars in .env: ${missing.join(', ')}`,
-          'config',
-          false,
-          { missing },
-          ErrorCode.AUTH_FAILED,
-        ),
-      );
-    }
-    // Validate service account credentials file is accessible
-    const credPath = process.env.GOOGLE_APPLICATION_CREDENTIALS;
-    if (!credPath) {
-      return err(
-        new PentestError(
-          'Vertex AI mode requires GOOGLE_APPLICATION_CREDENTIALS pointing to a service account key JSON file',
-          'config',
-          false,
-          {},
-          ErrorCode.AUTH_FAILED,
-        ),
-      );
-    }
-    try {
-      await fs.access(credPath);
-    } catch {
-      return err(
-        new PentestError(
-          `Service account key file not found at: ${credPath}`,
-          'config',
-          false,
-          { credPath },
-          ErrorCode.AUTH_FAILED,
-        ),
-      );
-    }
-    logger.info('Vertex AI credentials OK');
-    return ok(undefined);
-  }
-
-  // 4. Check that at least one credential is present
-  if (!process.env.ANTHROPIC_API_KEY && !process.env.CLAUDE_CODE_OAUTH_TOKEN && !process.env.ANTHROPIC_AUTH_TOKEN) {
+  if (!hasApiKey && !hasBedrock && !hasVertex) {
     return err(
       new PentestError(
-        'No API credentials found. Set ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN in .env (or use CLAUDE_CODE_USE_BEDROCK=1 for AWS Bedrock, or CLAUDE_CODE_USE_VERTEX=1 for Google Vertex AI)',
+        'No API credentials found. Set OPENAI_API_KEY or ANTHROPIC_API_KEY in .env (or use CLAUDE_CODE_USE_BEDROCK=1 for AWS Bedrock, or CLAUDE_CODE_USE_VERTEX=1 for Google Vertex AI). For DeepSeek, use OPENAI_API_KEY=sk-... or LLM_PROVIDER=anthropic + ANTHROPIC_API_KEY.',
         'config',
         false,
         {},
@@ -387,35 +239,120 @@ async function validateCredentials(logger: ActivityLogger, apiKey?: string, prov
     );
   }
 
-  // 5. Validate via SDK query
-  const authType = process.env.CLAUDE_CODE_OAUTH_TOKEN ? 'OAuth token' : 'API key';
-  logger.info(`Validating ${authType} via SDK...`);
-
-  try {
-    for await (const message of query({ prompt: 'hi', options: { model: resolveModel('small'), maxTurns: 1 } })) {
-      if (message.type === 'assistant' && message.error) {
-        return classifySdkError(message.error, authType);
-      }
-      if (message.type === 'result') {
-        break;
+  // 3. Bedrock mode
+  if (hasBedrock) {
+    const required = ['AWS_REGION', 'AWS_BEARER_TOKEN_BEDROCK'];
+    const missing = required.filter((v) => !process.env[v]);
+    if (missing.length > 0) {
+      return err(
+        new PentestError(
+          `Bedrock mode requires: ${missing.join(', ')}`,
+          'config',
+          false,
+          { missing },
+          ErrorCode.AUTH_FAILED,
+        ),
+      );
+    }
+    // Also need model overrides
+    for (const tier of ['ANTHROPIC_SMALL_MODEL', 'ANTHROPIC_MEDIUM_MODEL', 'ANTHROPIC_LARGE_MODEL']) {
+      if (!process.env[tier]) {
+        return err(
+          new PentestError(
+            `Bedrock model not set: set ${tier} in .env`,
+            'config',
+            false,
+            { missing: [tier] },
+            ErrorCode.AUTH_FAILED,
+          ),
+        );
       }
     }
-
-    logger.info(`${authType} OK`);
+    logger.info('Bedrock credentials OK');
     return ok(undefined);
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    const retryable = isRetryableError(error instanceof Error ? error : new Error(message));
+  }
+
+  // 4. Vertex AI mode
+  if (hasVertex) {
+    const required = ['CLOUD_ML_REGION', 'ANTHROPIC_VERTEX_PROJECT_ID', 'GOOGLE_APPLICATION_CREDENTIALS'];
+    const missing = required.filter((v) => !process.env[v]);
+    if (missing.length > 0) {
+      return err(
+        new PentestError(
+          `Vertex AI mode requires: ${missing.join(', ')}`,
+          'config',
+          false,
+          { missing },
+          ErrorCode.AUTH_FAILED,
+        ),
+      );
+    }
+    try {
+      const credPath = process.env.GOOGLE_APPLICATION_CREDENTIALS!;
+      await fs.access(credPath);
+    } catch {
+      return err(
+        new PentestError(
+          `Service account key file not found: ${process.env.GOOGLE_APPLICATION_CREDENTIALS}`,
+          'config',
+          false,
+          {},
+          ErrorCode.AUTH_FAILED,
+        ),
+      );
+    }
+    // Model overrides required for Vertex
+    for (const tier of ['ANTHROPIC_SMALL_MODEL', 'ANTHROPIC_MEDIUM_MODEL', 'ANTHROPIC_LARGE_MODEL']) {
+      if (!process.env[tier]) {
+        return err(
+          new PentestError(
+            `Vertex AI model not set: set ${tier} in .env`,
+            'config',
+            false,
+            { missing: [tier] },
+            ErrorCode.AUTH_FAILED,
+          ),
+        );
+      }
+    }
+    logger.info('Vertex AI credentials OK');
+    return ok(undefined);
+  }
+
+  // 5. API key-based validation via HTTP ping
+  const authType = apiKey ? 'Config API key' : 'OpenAI/Anthropic API key';
+  logger.info(`Validating ${authType}...`);
+
+  try {
+    const result = await validateLLMConnection({
+      apiKey: llmConfig.apiKey || undefined,
+      ...(provider ? { provider } : {}),
+      ...(baseUrl ? { baseUrl } : {}),
+    });
+
+    if (result.ok) {
+      logger.info(`${authType} OK`);
+      return ok(undefined);
+    }
 
     return err(
       new PentestError(
-        retryable
-          ? `Failed to reach Anthropic API. Check your network connection.`
-          : `${authType} validation failed: ${message}`,
-        retryable ? 'network' : 'config',
-        retryable,
-        { authType },
-        retryable ? undefined : ErrorCode.AUTH_FAILED,
+        `${authType} validation failed: ${result.error}. Check your credentials in .env.`,
+        'config',
+        false,
+        {},
+        ErrorCode.AUTH_FAILED,
+      ),
+    );
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return err(
+      new PentestError(
+        `Credential validation failed: ${message}`,
+        'network',
+        false,
+        {},
+        ErrorCode.AUTH_FAILED,
       ),
     );
   }
@@ -498,91 +435,66 @@ async function validateTargetUrl(targetUrl: string, logger: ActivityLogger): Pro
     return ok(undefined);
   } catch (error) {
     const isLoopback = isLoopbackAddress(resolvedAddress);
-    const detail = error instanceof Error ? error.message : String(error);
+    const hint = isLoopback
+      ? `\n  Hint: The target resolves to a loopback address (${resolvedAddress}). When running in Docker, 'localhost' refers to the container, not your host.\n  Use 'host.docker.internal' or the host machine's IP to reach services running on the host.`
+      : '';
 
-    if (isLoopback) {
-      const suggestion = targetUrl.replace(hostname, 'host.docker.internal');
-      return err(
-        new PentestError(
-          `Target URL ${targetUrl} resolves to ${resolvedAddress} (loopback) and is not reachable. ` +
-            `For local services, use host.docker.internal instead of ${hostname} (e.g., ${suggestion})`,
-          'network',
-          false,
-          { targetUrl, resolvedAddress, hostname },
-          ErrorCode.TARGET_UNREACHABLE,
-        ),
-      );
-    }
-
+    const message = error instanceof Error ? error.message : String(error);
     return err(
       new PentestError(
-        `Target URL ${targetUrl} is not reachable: ${detail}`,
+        `Unable to connect to target URL: ${targetUrl}${hint}`,
         'network',
         false,
-        { targetUrl, resolvedAddress },
+        { targetUrl, hostname, resolvedAddress },
         ErrorCode.TARGET_UNREACHABLE,
       ),
     );
   }
 }
 
-// === Preflight Orchestrator ===
+// === Main Preflight Entry Point ===
 
-/**
- * Run all preflight checks sequentially (cheapest first).
- *
- * 1. Repository path exists and contains .git
- * 2. Config file parses and validates (if configPath provided)
- * 3. code_path rules match at least one entry in the repo (skipped without config)
- * 4. Credentials validate (API key, OAuth, Bedrock, or Vertex AI)
- * 5. Target URL is reachable from the container
- *
- * Returns on first failure.
- */
-export async function runPreflightChecks(
-  targetUrl: string,
-  repoPath: string,
-  configPath: string | undefined,
+export interface PreflightOptions {
+  repoPath?: string;
+  configPath?: string;
+  targetUrl?: string;
+  skipGitCheck?: boolean;
+  apiKey?: string;
+  providerConfig?: import('../types/config.js').ProviderConfig;
+}
+
+export async function runPreflight(
+  options: PreflightOptions,
   logger: ActivityLogger,
-  skipGitCheck?: boolean,
-  apiKey?: string,
-  providerConfig?: import('../types/config.js').ProviderConfig,
 ): Promise<Result<void, PentestError>> {
-  // 1. Repository check (free — filesystem only)
-  const repoResult = await validateRepo(repoPath, logger, skipGitCheck);
-  if (!repoResult.ok) {
-    return repoResult;
+  // 1. Validate repository
+  if (options.repoPath) {
+    const repoResult = await validateRepo(options.repoPath, logger, options.skipGitCheck);
+    if (!repoResult.ok) return repoResult;
   }
 
-  // 2. Config check (free — filesystem + CPU)
-  let parsedConfig: Config | null = null;
-  if (configPath) {
-    const configResult = await validateConfig(configPath, logger);
-    if (!configResult.ok) {
-      return configResult;
-    }
-    parsedConfig = configResult.value;
+  // 2. Validate config
+  let config: Config | undefined;
+  if (options.configPath) {
+    const configResult = await validateConfig(options.configPath, logger);
+    if (!configResult.ok) return configResult;
+    config = configResult.value;
   }
 
-  // 3. code_path rules must match real entries in the repo (filesystem only).
-  // Runs after both repo and config are valid, before any network round-trip.
-  if (parsedConfig) {
-    const codePathResult = await validateCodePathsExist(parsedConfig, repoPath, logger);
-    if (!codePathResult.ok) {
-      return codePathResult;
-    }
+  // 3. Validate code_path rules (requires repo + config)
+  if (options.repoPath && config) {
+    const codePathResult = await validateCodePathsExist(config, options.repoPath, logger);
+    if (!codePathResult.ok) return codePathResult;
   }
 
-  // 4. Credential check (cheap — 1 SDK round-trip, skipped when providerConfig present)
-  const credResult = await validateCredentials(logger, apiKey, providerConfig);
-  if (!credResult.ok) {
-    return credResult;
-  }
+  // 4. Validate credentials
+  const credResult = await validateCredentials(logger, options.apiKey, options.providerConfig);
+  if (!credResult.ok) return credResult;
 
-  // 5. Target URL reachability check (cheap — 1 HTTP round-trip)
-  const urlResult = await validateTargetUrl(targetUrl, logger);
-  if (!urlResult.ok) {
-    return urlResult;
+  // 5. Validate target URL
+  if (options.targetUrl) {
+    const targetResult = await validateTargetUrl(options.targetUrl, logger);
+    if (!targetResult.ok) return targetResult;
   }
 
   logger.info('All preflight checks passed');

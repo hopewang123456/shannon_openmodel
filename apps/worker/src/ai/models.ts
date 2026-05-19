@@ -8,35 +8,41 @@
  * Model tier definitions and resolution.
  *
  * Three tiers mapped to capability levels:
- * - "small"  (Haiku — summarization, structured extraction)
- * - "medium" (Sonnet — tool use, general analysis)
- * - "large"  (Opus — deep reasoning, complex analysis)
+ * - "small"  (Haiku / Flash — summarization, structured extraction)
+ * - "medium" (Sonnet / Pro — tool use, general analysis)
+ * - "large"  (Opus / Pro — deep reasoning, complex analysis)
  *
- * Users override via ANTHROPIC_SMALL_MODEL / ANTHROPIC_MEDIUM_MODEL / ANTHROPIC_LARGE_MODEL,
- * which works across all providers (direct, Bedrock, Vertex).
+ * Users override via env vars.
+ * Supports both OpenAI-compatible and Anthropic provider models.
  */
 
 export type ModelTier = 'small' | 'medium' | 'large';
 
 const DEFAULT_MODELS: Readonly<Record<ModelTier, string>> = {
-  small: 'claude-haiku-4-5-20251001',
-  medium: 'claude-sonnet-4-6',
-  large: 'claude-opus-4-7',
+  small: 'deepseek-chat',
+  medium: 'deepseek-chat',
+  large: 'deepseek-chat',
 };
 
 /** Resolve a model tier to a concrete model ID. */
 export function resolveModel(tier: ModelTier = 'medium'): string {
-  switch (tier) {
-    case 'small':
-      return process.env.ANTHROPIC_SMALL_MODEL || DEFAULT_MODELS.small;
-    case 'large':
-      return process.env.ANTHROPIC_LARGE_MODEL || DEFAULT_MODELS.large;
-    default:
-      return process.env.ANTHROPIC_MEDIUM_MODEL || DEFAULT_MODELS.medium;
-  }
+  const envKey = `LLM_${tier.toUpperCase()}_MODEL`;
+  const envVal = process.env[envKey];
+  if (envVal) return envVal;
+
+  // Fallback: try ANTHROPIC_*_MODEL for backward compat
+  const anthropicKey = `ANTHROPIC_${tier.toUpperCase()}_MODEL`;
+  const anthropicVal = process.env[anthropicKey];
+  if (anthropicVal) return anthropicVal;
+
+  // Fallback: LLM_MODEL for all tiers
+  const fallback = process.env.LLM_MODEL;
+  if (fallback) return fallback;
+
+  return DEFAULT_MODELS[tier];
 }
 
-/** Whether a model supports adaptive thinking. Opus 4.6 and 4.7 only. */
-export function supportsAdaptiveThinking(model: string): boolean {
-  return /opus-4-[67]/.test(model);
+/** Whether a model supports adaptive thinking. Legacy — kept for backward compat. */
+export function supportsAdaptiveThinking(_model: string): boolean {
+  return false; // Not supported in our multi-provider setup
 }

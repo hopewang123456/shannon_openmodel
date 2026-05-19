@@ -4,9 +4,7 @@
 // it under the terms of the GNU Affero General Public License version 3
 // as published by the Free Software Foundation.
 
-// Type definitions for Claude executor message processing pipeline
-
-import type { SDKAssistantMessageError } from '@anthropic-ai/claude-agent-sdk';
+// Type definitions for LLM executor message processing pipeline
 
 export interface ExecutionContext {
   isParallelExecution: boolean;
@@ -58,7 +56,7 @@ export interface ContentBlock {
 
 export interface AssistantMessage {
   type: 'assistant';
-  error?: SDKAssistantMessageError;
+  error?: string;
   message: {
     content: ContentBlock[] | string;
   };

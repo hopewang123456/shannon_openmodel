@@ -8,10 +8,9 @@
  * Zod schema definitions for vulnerability exploitation queue structured outputs.
  *
  * Each vuln agent returns a structured JSON response matching its schema.
- * The SDK validates the output against the JSON Schema generated from these Zod definitions.
+ * The LLM is instructed via the prompt to output JSON matching the schema.
  */
 
-import type { JsonSchemaOutputFormat } from '@anthropic-ai/claude-agent-sdk';
 import { z } from 'zod';
 import type { AgentName } from '../types/agents.js';
 
@@ -101,9 +100,10 @@ export type AuthzFinding = z.infer<typeof AuthzVulnerability>;
 
 // === Convert to JSON Schema for SDK ===
 
-// NOTE: The SDK's AJV validator expects draft-07. Zod defaults to draft-2020-12 which
-// causes the SDK to silently skip structured output.
-function toOutputFormat(zodSchema: z.ZodType): JsonSchemaOutputFormat {
+// NOTE: Structured output validation via JSON schema is handled by prompting
+// the model to return JSON. The schema definitions below are used for type
+// inference and documentation, not for SDK-level validation.
+function toOutputFormat(zodSchema: z.ZodType): Record<string, unknown> {
   return { type: 'json_schema', schema: z.toJSONSchema(zodSchema, { target: 'draft-07' }) as Record<string, unknown> };
 }
 
@@ -111,7 +111,7 @@ function toOutputFormat(zodSchema: z.ZodType): JsonSchemaOutputFormat {
 // Two maps cached at module load; the only per-mode difference is the
 // description on the `notes` field, which steers the LLM's writing.
 
-function buildOutputFormats(exploit: boolean): Partial<Record<AgentName, JsonSchemaOutputFormat>> {
+function buildOutputFormats(exploit: boolean): Partial<Record<AgentName, Record<string, unknown>>> {
   const base = makeBase(exploit);
   return {
     'injection-vuln': toOutputFormat(z.object({ vulnerabilities: z.array(base.extend({
@@ -176,7 +176,7 @@ const VULN_AGENT_QUEUE_FILENAMES: Partial<Record<AgentName, string>> = {
 };
 
 /** Returns the structured output format for a vuln agent, or undefined for non-vuln agents. */
-export function getOutputFormat(agentName: AgentName, exploit = true): JsonSchemaOutputFormat | undefined {
+export function getOutputFormat(agentName: AgentName, exploit = true): Record<string, unknown> | undefined {
   return (exploit ? OUTPUT_FORMATS_EXPLOIT : OUTPUT_FORMATS_ANALYSIS)[agentName];
 }
 
