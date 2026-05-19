@@ -25,7 +25,6 @@ import http from 'node:http';
 import https from 'node:https';
 import { glob } from 'zx';
 import { validateLLMConnection } from '../ai/llm-provider.js';
-import { resolveModel } from '../ai/models.js';
 import { parseConfig } from '../config-parser.js';
 import type { ActivityLogger } from '../types/activity-logger.js';
 import type { Config, Rule } from '../types/config.js';
@@ -325,7 +324,7 @@ async function validateCredentials(logger: ActivityLogger, apiKey?: string, prov
 
   try {
     const result = await validateLLMConnection({
-      apiKey: llmConfig.apiKey || undefined,
+      ...(llmConfig.apiKey ? { apiKey: llmConfig.apiKey } : {}),
       ...(provider ? { provider } : {}),
       ...(baseUrl ? { baseUrl } : {}),
     });
@@ -439,7 +438,8 @@ async function validateTargetUrl(targetUrl: string, logger: ActivityLogger): Pro
       ? `\n  Hint: The target resolves to a loopback address (${resolvedAddress}). When running in Docker, 'localhost' refers to the container, not your host.\n  Use 'host.docker.internal' or the host machine's IP to reach services running on the host.`
       : '';
 
-    const message = error instanceof Error ? error.message : String(error);
+    const _message = error instanceof Error ? error.message : String(error);
+    void _message; // suppress unused warning
     return err(
       new PentestError(
         `Unable to connect to target URL: ${targetUrl}${hint}`,

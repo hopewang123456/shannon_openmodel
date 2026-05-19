@@ -261,7 +261,7 @@ async function callOpenAICompatibleAPI(
       Authorization: `Bearer ${config.apiKey}`,
     },
     body: JSON.stringify(body),
-    signal,
+    signal: signal ?? null,
   });
 
   if (!response.ok) {
@@ -352,7 +352,7 @@ async function callAnthropicAPI(
       'anthropic-version': '2023-06-01',
     },
     body: JSON.stringify(body),
-    signal,
+    signal: signal ?? null,
   });
 
   if (!response.ok) {
@@ -370,7 +370,7 @@ async function callAnthropicAPI(
 
 export async function validateLLMConnection(config?: Partial<LLMConfig>): Promise<{ ok: boolean; error?: string }> {
   try {
-    const response = await callLLM(
+    await callLLM(
       [{ role: 'user', content: 'Reply with just the word "ok".' }],
       undefined,
       { ...config, maxTokens: 10 },

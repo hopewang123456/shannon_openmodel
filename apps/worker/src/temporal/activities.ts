@@ -29,7 +29,7 @@ import { getContainer, getOrCreateContainer, removeContainer } from '../services
 import { classifyErrorForTemporal, PentestError } from '../services/error-handling.js';
 import { ExploitationCheckerService } from '../services/exploitation-checker.js';
 import { executeGitCommandWithRetry } from '../services/git-manager.js';
-import { runPreflightChecks } from '../services/preflight.js';
+import { runPreflight } from '../services/preflight.js';
 import type { ExploitationDecision, VulnType } from '../services/queue-validation.js';
 import { renderFindingsFromQueues } from '../services/findings-renderer.js';
 import { assembleFinalReport, injectModelIntoReport } from '../services/reporting.js';
@@ -324,14 +324,16 @@ export async function runPreflightValidation(input: ActivityInput): Promise<void
     const logger = createActivityLogger();
     logger.info('Running preflight validation...', { attempt: attemptNumber });
 
-    const result = await runPreflightChecks(
-      input.webUrl,
-      input.repoPath,
-      input.configPath,
+    const result = await runPreflight(
+      {
+        targetUrl: input.webUrl,
+        repoPath: input.repoPath,
+        configPath: input.configPath,
+        skipGitCheck: input.skipGitCheck,
+        apiKey: input.apiKey,
+        providerConfig: input.providerConfig,
+      } as import('../services/preflight.js').PreflightOptions,
       logger,
-      input.skipGitCheck,
-      input.apiKey,
-      input.providerConfig,
     );
 
     if (isErr(result)) {

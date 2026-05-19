@@ -18,13 +18,13 @@
 import { fs, path } from 'zx';
 import type { AuditSession } from '../audit/index.js';
 import { deliverablesDir } from '../paths.js';
-import { isRetryableError, PentestError } from '../services/error-handling.js';
+import { isRetryableError } from '../services/error-handling.js';
 import { AGENT_VALIDATORS } from '../session-manager.js';
 import type { ActivityLogger } from '../types/activity-logger.js';
 import { formatTimestamp } from '../utils/formatting.js';
 import { Timer } from '../utils/metrics.js';
 import { createAuditLogger } from './audit-logger.js';
-import { callLLM, type LLMToolDefinition } from './llm-provider.js';
+import { type LLMConfig, callLLM } from './llm-provider.js';
 import { type ModelTier, resolveModel } from './models.js';
 import { detectExecutionContext, formatCompletionMessage, formatErrorOutput } from './output-formatters.js';
 import { createProgressManager } from './progress-manager.js';
@@ -138,9 +138,9 @@ export async function runClaudePrompt(
   auditSession: AuditSession | null = null,
   logger: ActivityLogger,
   modelTier: ModelTier = 'medium',
-  _outputFormat?: unknown, // preserved for API compatibility; structured output handled via prompt
+  _outputFormat?: unknown,
   apiKey?: string,
-  deliverablesSubdir?: string,
+  _deliverablesSubdir?: string,
   providerConfig?: import('../types/config.js').ProviderConfig,
 ): Promise<ClaudePromptResult> {
   const timer = new Timer(`agent-${description.toLowerCase().replace(/\s+/g, '-')}`);
@@ -194,12 +194,12 @@ export async function runClaudePrompt(
     const response = await callLLM(
       messages,
       undefined, // no tools for now
-      {
+      ({
         model,
-        apiKey: llmConfig.apiKey || undefined,
+        ...(llmConfig.apiKey ? { apiKey: llmConfig.apiKey } : {}),
         ...(provider ? { provider } : {}),
         ...(baseUrl ? { baseUrl } : {}),
-      },
+      }) as Partial<LLMConfig>,
     );
 
     result = response.content;
