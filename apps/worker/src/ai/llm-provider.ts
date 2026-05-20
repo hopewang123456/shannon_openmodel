@@ -261,7 +261,7 @@ async function callOpenAICompatibleAPI(
       Authorization: `Bearer ${config.apiKey}`,
     },
     body: JSON.stringify(body),
-    signal: signal ?? AbortSignal.timeout(60000),
+    signal: signal ?? AbortSignal.timeout(120000),
   });
 
   if (!response.ok) {
