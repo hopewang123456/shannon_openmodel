@@ -65,6 +65,44 @@ LLM_LARGE_MODEL=deepseek-chat
 - 参数签名从**位置参数**改为**选项对象**，减少调用方出错概率
 - 移除顶层未引用变量 `resolveModel` 的导入
 
+### 🔄 Pipeline-Testing 模式重写：摆脱 save-deliverable & playwright-cli
+
+**文件：** `apps/worker/prompts/pipeline-testing/*`
+
+原版 Shannon 的 pipeline-testing（快速验证模式）依赖两个外部工具：
+- `save-deliverable` — 自有脚本，用于保存分析结果
+- `playwright-cli` — 浏览器自动化，用于动态截图验证
+
+这在 CI/无头环境或没有 Node.js 工具链时就是一个硬依赖。**本 Fork 将 7 个 pipeline-testing prompt 全部从 CLI 调用模式改为纯 LLM 代码分析模式**：
+
+| 原版 | 本 Fork |
+|------|---------|
+| `@include(shared/_filesystem.txt)` + `save-deliverable` | 直接注入文件系统上下文 + 自然语言输出（中文） |
+| `playwright-cli navigate` + `screenshot` | LLM 直接分析源码，无需浏览器 |
+| `return []` 空数组 | 输出完整 JSON 结构化漏洞数据 |
+
+每个 prompt 现在输出详细的中文分析，附带标准化的 JSON 漏洞数据结构，可直接用于最终安全报告。pipeline-testing 模式从此**零外部依赖**。
+
+### 🪟 WSL 兼容性改进
+
+针对 Windows WSL2 环境的适配：
+- `entrypoint.sh`：跳过 `su -m pentest`（WSL 下 env 丢失）
+- `apps/cli/src/docker.ts`：`docker compose` → `docker-compose`（v5 兼容）
+- `apps/cli/src/docker.ts`：跳过 `SHANNON_HOST_UID` 设置（WSL 不需要）
+- `apps/cli/src/env.ts`：新增 `OPENAI_API_KEY`、`LLM_PROVIDER`、`LLM_*_MODEL` 环境变量透传
+
+### 📈 Report Agent 增强
+
+**文件：** `apps/worker/src/services/agent-execution.ts`
+
+报告生成阶段不再仅凭记忆，而是将每位 agent 的完整 deliverable 上下文注入 prompt，生成质量更高的安全评估报告。
+
+### ⏱ Fetch 超时优化
+
+**文件：** `apps/worker/src/ai/llm-provider.ts`
+
+推理模型（如 DeepSeek Reasoner）响应时间长，将 fetch 超时从 60s 提升至 120s，避免推理过程中的超时断开。
+
 ---
 
 ## 快速开始（国内友好版）
@@ -119,7 +157,18 @@ ANTHROPIC_BASE_URL=https://api.deepseek.com/anthropic
 | `apps/worker/src/ai/queue-schemas.ts` | 修改 | 移除 SDK 类型引用 |
 | `apps/worker/src/ai/message-handlers.ts` | 修改 | 清理 SDK 引用 |
 | `apps/worker/src/services/preflight.ts` | 重写 | HTTP ping 代替 SDK query，选项对象签名 |
-| `entrypoint.sh` | 修改 | 移除 `/tmp/.claude` 路径 |
+| `entrypoint.sh` | 修改 | 移除 `/tmp/.claude` 路径，跳过 WSL 下 `su -m pentest` |
+| `apps/worker/prompts/pipeline-testing/pre-recon-code.txt` | 重写 | 从 `save-deliverable` CLI 改为纯 LLM 代码分析 |
+| `apps/worker/prompts/pipeline-testing/recon.txt` | 重写 | 同上，摆脱 playwright-cli 依赖 |
+| `apps/worker/prompts/pipeline-testing/report-executive.txt` | 重写 | 注入完整 deliverables 上下文 |
+| `apps/worker/prompts/pipeline-testing/vuln-auth.txt` | 重写 | 输出中文分析 + JSON 结构化数据 |
+| `apps/worker/prompts/pipeline-testing/vuln-authz.txt` | 重写 | 同上 |
+| `apps/worker/prompts/pipeline-testing/vuln-injection.txt` | 重写 | 同上 |
+| `apps/worker/prompts/pipeline-testing/vuln-ssrf.txt` | 重写 | 同上 |
+| `apps/worker/prompts/pipeline-testing/vuln-xss.txt` | 重写 | 同上 |
+| `apps/worker/src/services/agent-execution.ts` | 增强 | 报告阶段注入完整 deliverable 上下文 |
+| `apps/cli/src/docker.ts` | 修复 | WSL 兼容：docker-compose 命名、跳过 UID 设置 |
+| `apps/cli/src/env.ts` | 增强 | 新增多 Provider 环境变量透传 |
 
 ---
 

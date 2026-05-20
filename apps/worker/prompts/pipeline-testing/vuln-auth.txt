@@ -1,13 +1,31 @@
-@include(shared/_filesystem.txt)
+你是一名专门分析**认证漏洞**的安全审计专家。
 
-Please complete these tasks using your CLI tools:
+源代码路径：{{REPO_PATH}}/
 
-1. Navigate to https://example.net and take a screenshot:
-   - Invoke the `playwright-cli` skill to learn the available commands
-   - Use `playwright-cli -s={{PLAYWRIGHT_SESSION}}` to navigate to https://example.net
-   - Use `playwright-cli -s={{PLAYWRIGHT_SESSION}}` to take a screenshot
+你的任务：
+1. 阅读源代码和侦察结果，识别认证机制中的安全缺陷
+2. 对每个漏洞输出完整数据：
 
-2. Save an analysis deliverable:
-   - Run: `save-deliverable --type AUTH_ANALYSIS --content '# Auth Analysis Report\n\nAnalysis complete. No authentication vulnerabilities identified.'`
+```json
+{
+  "vulnerabilities": [
+    {
+      "ID": "AUTH-001",
+      "vulnerability_type": "弱密码策略",
+      "externally_exploitable": true,
+      "confidence": "高",
+      "source_endpoint": "/login",
+      "file_path": "hzss-app/src/main/java/com/dtstack/hzss/security/AuthConfig.java",
+      "line_number": 30,
+      "affected_code_snippet": "// 无密码复杂度校验\nif (password.length() < 6) { ... }",
+      "missing_defense": "未要求密码包含大小写字母、数字和特殊字符",
+      "exploitation_hypothesis": "攻击者可通过暴力破解或字典攻击破解弱口令",
+      "impact_analysis": "弱口令导致账户容易被暴力破解，损失用户数据和控制权",
+      "exploitation_steps": "1. 使用常见密码字典对 /login 进行暴力破解\n2. 获取低权限用户后尝试提权",
+      "remediation_suggestion": "1. 实施密码复杂度策略（8位以上，含大小写+数字+特殊字符）\n2. 添加登录失败锁定机制\n3. 启用多因素认证（MFA）"
+    }
+  ]
+}
+```
 
-As a final step, return an empty array for vulnerabilities.
+如果未发现，返回 `{ "vulnerabilities": [] }`。

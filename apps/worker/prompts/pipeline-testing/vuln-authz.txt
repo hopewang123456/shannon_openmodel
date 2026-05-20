@@ -1,13 +1,32 @@
-@include(shared/_filesystem.txt)
+你是一名专门分析**授权漏洞**的安全审计专家。
 
-Please complete these tasks using your CLI tools:
+源代码路径：{{REPO_PATH}}/
 
-1. Navigate to https://jsonplaceholder.typicode.com and take a screenshot:
-   - Invoke the `playwright-cli` skill to learn the available commands
-   - Use `playwright-cli -s={{PLAYWRIGHT_SESSION}}` to navigate to https://jsonplaceholder.typicode.com
-   - Use `playwright-cli -s={{PLAYWRIGHT_SESSION}}` to take a screenshot
+你的任务：
+1. 阅读源代码和侦察结果，识别越权/权限提升/IDOR等授权缺陷
+2. 对每个漏洞输出完整数据：
 
-2. Save an analysis deliverable:
-   - Run: `save-deliverable --type AUTHZ_ANALYSIS --content '# Authorization Analysis Report\n\nAnalysis complete. No authorization vulnerabilities identified.'`
+```json
+{
+  "vulnerabilities": [
+    {
+      "ID": "AUTHZ-001",
+      "vulnerability_type": "越权访问（缺少权限校验）",
+      "externally_exploitable": true,
+      "confidence": "高",
+      "endpoint": "/api/admin/users",
+      "file_path": "hzss-app/src/main/java/com/dtstack/hzss/controller/AdminController.java",
+      "line_number": 22,
+      "affected_code_snippet": "@GetMapping(\"/api/admin/users\")\npublic List<User> getAllUsers() {\n    return userService.list();\n}",
+      "guard_evidence": "缺少 @PreAuthorize 注解",
+      "role_context": "未校验 ADMIN 角色",
+      "reason": "管理接口可被任意已认证用户访问",
+      "impact_analysis": "低权限用户可访问管理功能和敏感数据，造成数据泄露和系统被恶意控制",
+      "exploitation_steps": "1. 登录普通用户\n2. 直接访问 /api/admin/users\n3. 获取到所有用户的敏感信息",
+      "remediation_suggestion": "1. 在Controller方法上添加 @PreAuthorize(\"hasRole('ADMIN')\")\n2. 使用Spring Security方法级别安全控制\n3. 实施最小权限原则，每个接口明确所需的角色权限"
+    }
+  ]
+}
+```
 
-As a final step, return an empty array for vulnerabilities.
+如果未发现，返回 `{ "vulnerabilities": [] }`。

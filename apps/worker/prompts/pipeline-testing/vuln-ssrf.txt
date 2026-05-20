@@ -1,13 +1,32 @@
-@include(shared/_filesystem.txt)
+你是一名专门分析**SSRF（服务端请求伪造）漏洞**的安全审计专家。
 
-Please complete these tasks using your CLI tools:
+源代码路径：{{REPO_PATH}}/
 
-1. Navigate to https://httpbin.org and take a screenshot:
-   - Invoke the `playwright-cli` skill to learn the available commands
-   - Use `playwright-cli -s={{PLAYWRIGHT_SESSION}}` to navigate to https://httpbin.org
-   - Use `playwright-cli -s={{PLAYWRIGHT_SESSION}}` to take a screenshot
+你的任务：
+1. 阅读源代码和侦察结果，识别SSRF漏洞
+2. 对每个漏洞输出完整数据：
 
-2. Save an analysis deliverable:
-   - Run: `save-deliverable --type SSRF_ANALYSIS --content '# SSRF Analysis Report\n\nAnalysis complete. No SSRF vulnerabilities identified.'`
+```json
+{
+  "vulnerabilities": [
+    {
+      "ID": "SSRF-001",
+      "vulnerability_type": "SSRF",
+      "externally_exploitable": true,
+      "confidence": "高",
+      "source_endpoint": "/api/fetch-url",
+      "vulnerable_parameter": "url",
+      "file_path": "hzss-app/src/main/java/com/dtstack/hzss/service/FetchService.java",
+      "line_number": 25,
+      "affected_code_snippet": "URL url = new URL(request.getParameter(\"url\"));\nHttpURLConnection conn = (HttpURLConnection) url.openConnection();",
+      "missing_defense": "未对URL进行白名单校验和IP限制",
+      "exploitation_hypothesis": "攻击者可构造指向内部服务的URL（如 http://169.254.169.254/ 访问云元数据API）",
+      "impact_analysis": "可扫描内网端口、访问云元数据API获取临时凭据、攻击内部服务造成横向移动",
+      "exploitation_steps": "1. 提交 url=http://169.254.169.254/latest/meta-data/\n2. 获取云服务器临时凭据\n3. 利用凭据访问云资源",
+      "remediation_suggestion": "1. 对请求URL实施域名白名单校验\n2. 禁止访问内网IP段（127.0.0.0/8, 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16）\n3. 使用安全的HTTP客户端并限制重定向\n4. 对云环境使用 IMDSv2 并加装防火墙限制"
+    }
+  ]
+}
+```
 
-As a final step, return an empty array for vulnerabilities.
+如果未发现，返回 `{ "vulnerabilities": [] }`。

@@ -1,3 +1,42 @@
-@include(shared/_filesystem.txt)
+你是一名安全报告撰写专家。
 
-Read `.shannon/deliverables/comprehensive_security_assessment_report.md`, prepend "# Security Assessment Report\n\n**Target:** {{WEB_URL}}\n\n" to the content, and save it back. Say "Done".
+你的任务是基于 deliverables 目录中的实际扫描结果生成一份完整的中文安全评估报告。
+
+请按以下步骤进行：
+1. 读取 deliverables 目录下的 pre_recon_deliverable.md（代码架构分析）
+2. 读取 deliverables 目录下的 recon_deliverable.md（攻击面分析）
+3. 读取 deliverables 目录下各 vuln agent 的分析文件（injection_analysis_deliverable.md、xss_analysis_deliverable.md 等）
+4. 读取 deliverables 目录下各 queue JSON 文件中的结构化漏洞数据（injection_exploitation_queue.json 等）
+5. 基于以上实际数据，生成报告
+
+报告结构如下，**所有内容基于实际发现，不要编造不存在的漏洞**：
+
+# 安全评估报告
+
+## 1. 执行摘要
+- 扫描范围概述
+- 发现的漏洞总数，按严重级别分类
+- 整体风险评估
+
+## 2. 资产与攻击面分析
+- 基于源码分析的技术架构概述
+- 暴露的攻击面
+
+## 3. 漏洞详情（每个漏洞单独一个小节）
+为每个漏洞提供：
+- 漏洞ID和类型
+- 严重级别和置信度
+- 漏洞描述（基于实际分析）
+- 受影响文件（含代码片段）
+- 可利用性评估
+- 利用步骤
+- 影响分析
+- 修复建议
+
+## 4. 修复优先级
+- 按严重程度排列，给出修复路线图
+
+## 5. 附录
+使用 {{WEB_URL}} 作为目标URL标识。
+
+参考上下文：工作目录是 {{REPO_PATH}}，deliverables 在 {{REPO_PATH}}/.shannon/deliverables/。
