@@ -143,10 +143,49 @@ export class AgentExecutionService {
 
     // 5. Execute agent
     const outputFormat = getOutputFormat(agentName, distributedConfig?.exploit ?? true);
+
+    // For the report agent, inject deliverables content as context
+    let context = '';
+    if (agentName === 'report') {
+      try {
+        const filesToRead = [
+          'pre_recon_deliverable.md',
+          'recon_deliverable.md',
+          'injection_exploitation_queue.json',
+          'xss_exploitation_queue.json',
+          'auth_exploitation_queue.json',
+          'authz_exploitation_queue.json',
+          'ssrf_exploitation_queue.json',
+          'auth_analysis_deliverable.md',
+          'authz_analysis_deliverable.md',
+          'injection_analysis_deliverable.md',
+          'xss_analysis_deliverable.md',
+          'ssrf_analysis_deliverable.md',
+          'comprehensive_security_assessment_report.md',
+        ];
+        const parts: string[] = ['以下是之前 agent 产出的分析文件内容，请基于这些真实数据生成报告：\n'];
+        for (const file of filesToRead) {
+          const filePath = path.join(deliverablesPath, file);
+          try {
+            const content = await fs.readFile(filePath, 'utf8');
+            if (content && content.trim().length > 5) {
+              parts.push(`--- ${file} ---\n${content.slice(0, 3000)}\n`);
+            }
+          } catch {
+            // file not found, skip
+          }
+        }
+        context = parts.join('\n');
+        logger.info(`Report context assembled from ${parts.length - 1} deliverable file(s)`);
+      } catch (err) {
+        logger.warn('Failed to assemble report context, proceeding without it');
+      }
+    }
+
     const result: ClaudePromptResult = await runClaudePrompt(
       prompt,
       repoPath,
-      '', // context
+      context,
       agentName, // description
       agentName,
       auditSession,
