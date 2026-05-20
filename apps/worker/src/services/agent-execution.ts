@@ -198,6 +198,15 @@ export class AgentExecutionService {
       logger.info(`Wrote structured output queue to ${queueFilename}`);
     }
 
+    // 8b. Write text result to deliverable file (for non-vuln agents like pre-recon/recon/report)
+    const deliverableFilename = AGENTS[agentName].deliverableFilename;
+    if (result.result && deliverableFilename) {
+      await fs.ensureDir(deliverablesPath);
+      const deliverablePath = path.join(deliverablesPath, deliverableFilename);
+      await fs.writeFile(deliverablePath, result.result, 'utf8');
+      logger.info(`Wrote deliverable to ${deliverableFilename}`);
+    }
+
     // 9. Validate output
     const validationPassed = await validateAgentOutput(result, agentName, deliverablesPath, logger);
     if (!validationPassed) {

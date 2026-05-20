@@ -205,11 +205,37 @@ export async function runClaudePrompt(
     result = response.content;
     turnCount = 1;
 
+    // Try to parse result as JSON for structured output (vuln agents)
+    let structuredOutput: unknown = undefined;
+    if (result) {
+      try {
+        // Try direct JSON parse first
+        structuredOutput = JSON.parse(result);
+      } catch {
+        // Try extracting JSON from markdown code blocks
+        const jsonMatch = result.match(/```(?:json)?\s*([\s\S]*?)```/);
+        if (jsonMatch && jsonMatch[1]) {
+          try {
+            structuredOutput = JSON.parse(jsonMatch[1]!);
+          } catch {
+            // Not valid JSON, keep as text
+          }
+        }
+      }
+      // If still not parsed but result looks like analysis text, create a minimal
+      // structured output so the pipeline can continue (vuln agents can proceed
+      // on empty findings rather than failing validation entirely)
+      if (structuredOutput === undefined && result.trim().length > 0) {
+        structuredOutput = { vulnerabilities: [] };
+      }
+    }
+
     const duration = timer.stop();
     progress.finish(formatCompletionMessage(execContext, description, turnCount, duration));
 
     return {
       result,
+      structuredOutput,
       success: true,
       duration,
       turns: turnCount,

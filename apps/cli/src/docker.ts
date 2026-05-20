@@ -79,7 +79,7 @@ export async function ensureInfra(): Promise<void> {
 
   const composeFile = getComposeFile();
   console.log('Starting Shannon infrastructure...');
-  execFileSync('docker', ['compose', '-f', composeFile, 'up', '-d'], { stdio: 'inherit' });
+  execFileSync('docker-compose', ['-f', composeFile, 'up', '-d'], { stdio: 'inherit' });
 
   console.log('Waiting for Temporal to be ready...');
   for (let i = 0; i < 30; i++) {
@@ -176,8 +176,9 @@ export function spawnWorker(opts: WorkerOptions): ChildProcess {
   // Add host flag for Linux
   args.push(...addHostFlag());
 
-  // UID remapping for Linux bind mounts
-  if (os.platform() === 'linux' && process.getuid && process.getgid) {
+  // UID remapping for Linux bind mounts (skip on WSL — user namespace is nested)
+  const isWSL = os.platform() === 'linux' && (process.env.WSL_DISTRO_NAME || '').length > 0;
+  if (os.platform() === 'linux' && !isWSL && process.getuid && process.getgid) {
     args.push('-e', `SHANNON_HOST_UID=${process.getuid()}`, '-e', `SHANNON_HOST_GID=${process.getgid()}`);
   }
 
@@ -259,9 +260,9 @@ export function stopWorkers(): void {
  */
 export function stopInfra(clean: boolean): void {
   const composeFile = getComposeFile();
-  const args = ['compose', '-f', composeFile, 'down'];
+  const args = ['-f', composeFile, 'down'];
   if (clean) args.push('-v');
-  execFileSync('docker', args, { stdio: 'inherit' });
+  execFileSync('docker-compose', args, { stdio: 'inherit' });
 }
 
 /**

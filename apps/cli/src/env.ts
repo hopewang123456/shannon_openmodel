@@ -11,6 +11,7 @@ import { getMode } from './mode.js';
 
 /** Environment variables forwarded to worker containers. */
 const FORWARD_VARS = [
+  // Legacy Claude SDK / Anthropic-only
   'ANTHROPIC_API_KEY',
   'ANTHROPIC_BASE_URL',
   'ANTHROPIC_AUTH_TOKEN',
@@ -27,6 +28,22 @@ const FORWARD_VARS = [
   'ANTHROPIC_LARGE_MODEL',
   'CLAUDE_CODE_MAX_OUTPUT_TOKENS',
   'CLAUDE_ADAPTIVE_THINKING',
+  // Multi-provider (our fork)
+  'LLM_PROVIDER',
+  'OPENAI_API_KEY',
+  'OPENAI_BASE_URL',
+  'LLM_MODEL',
+  'LLM_SMALL_MODEL',
+  'LLM_MEDIUM_MODEL',
+  'LLM_LARGE_MODEL',
+  'LLM_MAX_TOKENS',
+  // Proxy (for WSL/China environments)
+  'http_proxy',
+  'https_proxy',
+  'HTTP_PROXY',
+  'HTTPS_PROXY',
+  'NO_PROXY',
+  'no_proxy',
 ] as const;
 
 /**
@@ -78,6 +95,10 @@ function detectProviders(): string[] {
   if (isCustomBaseUrlConfigured()) providers.push('Custom Base URL');
   if (process.env.CLAUDE_CODE_USE_BEDROCK === '1') providers.push('AWS Bedrock');
   if (process.env.CLAUDE_CODE_USE_VERTEX === '1') providers.push('Google Vertex');
+  if (process.env.OPENAI_API_KEY) providers.push('OpenAI API key');
+  if (process.env.LLM_PROVIDER.toLowerCase() === 'anthropic' && process.env.ANTHROPIC_API_KEY) {
+    // Don't double-count; anthropic already listed above
+  }
   return providers;
 }
 
@@ -96,6 +117,9 @@ export function validateCredentials(): CredentialValidation {
   }
 
   if (process.env.ANTHROPIC_API_KEY) {
+    return { valid: true, mode: 'api-key' };
+  }
+  if (process.env.OPENAI_API_KEY) {
     return { valid: true, mode: 'api-key' };
   }
   if (process.env.CLAUDE_CODE_OAUTH_TOKEN) {
@@ -146,7 +170,7 @@ export function validateCredentials(): CredentialValidation {
 
   const hint =
     getMode() === 'local'
-      ? `No credentials found. Set ANTHROPIC_API_KEY in .env or export it.`
+      ? `No credentials found. Set OPENAI_API_KEY or ANTHROPIC_API_KEY in .env or export it.`
       : `Authentication not configured. Export variables or run 'npx @keygraph/shannon setup'.`;
   return {
     valid: false,

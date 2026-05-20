@@ -491,8 +491,9 @@ export async function runPreflight(
   const credResult = await validateCredentials(logger, options.apiKey, options.providerConfig);
   if (!credResult.ok) return credResult;
 
-  // 5. Validate target URL
-  if (options.targetUrl) {
+  // 5. Validate target URL (skip if exploit is disabled in config)
+  const exploitDisabled = config?.exploit === 'false';
+  if (options.targetUrl && !exploitDisabled) {
     const targetResult = await validateTargetUrl(options.targetUrl, logger);
     if (!targetResult.ok) return targetResult;
   }

@@ -15,4 +15,9 @@ if [ -n "$TARGET_UID" ] && [ "$TARGET_UID" != "$CURRENT_UID" ]; then
   chown -R pentest:pentest /app/sessions /app/workspaces
 fi
 
+# Run as root on WSL (user namespace nested, su -m breaks env vars)
+if [ -n "${WSL_DISTRO_NAME:-}" ]; then
+  exec "$@"
+fi
+
 exec su -m pentest -c "exec $*"

@@ -261,7 +261,7 @@ async function callOpenAICompatibleAPI(
       Authorization: `Bearer ${config.apiKey}`,
     },
     body: JSON.stringify(body),
-    signal: signal ?? null,
+    signal: signal ?? AbortSignal.timeout(60000),
   });
 
   if (!response.ok) {
@@ -352,7 +352,7 @@ async function callAnthropicAPI(
       'anthropic-version': '2023-06-01',
     },
     body: JSON.stringify(body),
-    signal: signal ?? null,
+    signal: signal ?? AbortSignal.timeout(60000),
   });
 
   if (!response.ok) {
